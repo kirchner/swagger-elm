@@ -1,17 +1,42 @@
 module Swagger.Decode exposing (..)
 
-import Json.Decode as Json exposing (Decoder, string, int, float, bool, keyValuePairs, field, list, map, value, Value, decodeValue, oneOf, lazy, andThen)
-import Json.Decode.Pipeline exposing (decode, required, optional, hardcoded)
+import Dict exposing (Dict)
+import Json.Decode as Json exposing (Decoder, Value, andThen, bool, decodeValue, dict, fail, field, float, int, keyValuePairs, lazy, list, map, oneOf, string, succeed, value)
+import Json.Decode.Pipeline exposing (decode, hardcoded, optional, required)
 import Regex exposing (regex)
+import Swagger.Definition exposing (Definition, Definitions, definition, definitions)
+import Swagger.Path
+    exposing
+        ( MediaTypeObject
+        , OperationObject
+        , OperationObjectData
+        , ParameterLocation(..)
+        , ParameterObject
+        , Path
+        , PathElement
+        , PathItem
+        , Paths
+        , ResponseObject
+        , ResponseType(..)
+        , ResponsesObject
+        , delete
+        , get
+        , head
+        , options
+        , patch
+        , pathElement
+        , post
+        , put
+        , trace
+        )
 import Swagger.Swagger exposing (Swagger)
-import Swagger.Definition exposing (Definitions, definitions, definition, Definition)
 import Swagger.Type
     exposing
-        ( Type(Object_, Array_, Dict_, String_, Enum_, Int_, Float_, Bool_, Ref_)
-        , Ref
+        ( Items(Items)
         , Properties(Properties)
-        , Items(Items)
-        , Property(Required, Optional, Default)
+        , Property(Default, Optional, Required)
+        , Ref
+        , Type(Array_, Bool_, Dict_, Enum_, Float_, Int_, Object_, Ref_, String_)
         , getDefault
         )
 
@@ -24,6 +49,7 @@ decodeSwagger : Decoder Swagger
 decodeSwagger =
     decode Swagger
         |> required "definitions" decodeTypes
+        |> required "paths" decodePaths
 
 
 decodeTypes : Decoder Definitions
@@ -82,15 +108,15 @@ extractRef : String -> Ref
 extractRef ref =
     let
         parsed =
-            (List.head (Regex.find (Regex.AtMost 1) (regex "^#/definitions/(.+)$") ref))
+            List.head (Regex.find (Regex.AtMost 1) (regex "^#/definitions/(.+)$") ref)
                 |> Maybe.andThen (List.head << .submatches)
     in
-        case parsed of
-            Just (Just ref_) ->
-                ref_
+    case parsed of
+        Just (Just ref_) ->
+            ref_
 
-            _ ->
-                Debug.crash "Unparseable reference " ++ ref
+        _ ->
+            Debug.crash "Unparseable reference " ++ ref
 
 
 decodePrimitive : (Maybe String -> Type) -> Decoder Type
@@ -187,6 +213,119 @@ property required ( name, type_ ) =
 
                 Nothing ->
                     Optional name type_
+
+
+
+---- PATHS
+
+
+decodePaths : Decoder Paths
+decodePaths =
+    keyValuePairs decodePathItem
+        |> map
+            (List.map
+                (\( pathString, pathItem ) ->
+                    ( pathString
+                        |> String.split "/"
+                        |> List.filter (\element -> element /= "")
+                        |> List.map pathElement
+                    , pathItem
+                    )
+                )
+            )
+
+
+decodePathItem : Decoder PathItem
+decodePathItem =
+    decode PathItem
+        |> maybe "summary" string
+        |> maybe "description" string
+        |> maybe "get" (decodeOperationObjectData |> map get)
+        |> maybe "put" (decodeOperationObjectData |> map put)
+        |> maybe "post" (decodeOperationObjectData |> map post)
+        |> maybe "delete" (decodeOperationObjectData |> map delete)
+        |> maybe "options" (decodeOperationObjectData |> map options)
+        |> maybe "head" (decodeOperationObjectData |> map head)
+        |> maybe "patch" (decodeOperationObjectData |> map patch)
+        |> maybe "trace" (decodeOperationObjectData |> map trace)
+        |> optional "parameters" (list decodeParameterObject) []
+
+
+decodeOperationObjectData : Decoder OperationObjectData
+decodeOperationObjectData =
+    decode OperationObjectData
+        |> maybe "summary" string
+        |> maybe "description" string
+        |> optional "parameters" (list decodeParameterObject) []
+        |> required "responses" decodeResponsesObject
+
+
+decodeParameterObject : Decoder ParameterObject
+decodeParameterObject =
+    decode ParameterObject
+        |> required "name" string
+        |> required "in" decodeParameterLocation
+        |> maybe "description" string
+        |> required "required" bool
+
+
+decodeParameterLocation : Decoder ParameterLocation
+decodeParameterLocation =
+    string
+        |> andThen
+            (\location ->
+                case location of
+                    "query" ->
+                        succeed ParameterLocationQuery
+
+                    "header" ->
+                        succeed ParameterLocationHeader
+
+                    "path" ->
+                        succeed ParameterLocationPath
+
+                    "cookie" ->
+                        succeed ParameterLocationCookie
+
+                    _ ->
+                        fail "TODO"
+            )
+
+
+decodeResponsesObject : Decoder ResponsesObject
+decodeResponsesObject =
+    keyValuePairs decodeResponseObject
+        |> map
+            (List.map
+                (\( responseType, responseObject ) ->
+                    case responseType of
+                        "default" ->
+                            ( DefaultResponse, responseObject )
+
+                        _ ->
+                            case responseType |> String.toInt of
+                                Ok httpStatus ->
+                                    ( HttpStatus httpStatus, responseObject )
+
+                                Err error ->
+                                    -- TODO
+                                    Debug.crash error
+                )
+            )
+
+
+decodeResponseObject : Decoder ResponseObject
+decodeResponseObject =
+    decode ResponseObject
+        |> required "description" string
+        |> optional "content" (dict decodeMediaTypeObject) Dict.empty
+        |> maybe "schema" decodeType
+
+
+decodeMediaTypeObject : Decoder MediaTypeObject
+decodeMediaTypeObject =
+    decode MediaTypeObject
+        |> required "schema" decodeType
 
 
 

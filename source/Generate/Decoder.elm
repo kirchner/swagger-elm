@@ -1,15 +1,15 @@
 module Generate.Decoder exposing (..)
 
-import Json.Decode as Json exposing (decodeString)
-import Generate.Utils exposing (typeName, decoderName, nestedDecoderName)
-import Codegen.Function as Fun exposing (function, pipeline, letin, caseof, lazy)
+import Codegen.Function as Fun exposing (caseof, function, lazy, letin, pipeline)
 import Codegen.Literal exposing (string)
-import Swagger.Definition as Def exposing (Definition, getType, getFullName)
+import Generate.Utils exposing (decoderName, nestedDecoderName, typeName)
+import Json.Decode as Json exposing (decodeString)
+import Swagger.Definition as Def exposing (Definition, getFullName, getType)
 import Swagger.Type
     exposing
-        ( Type(Object_, Array_, Dict_, String_, Enum_, Int_, Float_, Bool_, Ref_)
-        , Properties(Properties)
-        , Property(Required, Optional, Default)
+        ( Properties(Properties)
+        , Property(Default, Optional, Required)
+        , Type(Array_, Bool_, Dict_, Enum_, Float_, Int_, Object_, Ref_, String_)
         , getItemsType
         )
 
@@ -20,10 +20,10 @@ renderDecoder definition =
         name =
             getFullName definition
     in
-        function (decoderName <| name)
-            []
-            ("Decoder " ++ typeName name)
-            (renderDecoderBody definition)
+    function (decoderName <| name)
+        []
+        ("Decoder " ++ typeName name)
+        (renderDecoderBody definition)
 
 
 renderDecoderBody : Definition -> String
@@ -57,6 +57,37 @@ renderDecoderBody definition =
             decoderName ref
 
 
+renderDecoderBodyInline : Definition -> String
+renderDecoderBodyInline definition =
+    case getType definition of
+        Object_ properties ->
+            renderObjectBody (getFullName definition) properties
+
+        Array_ items ->
+            renderArrayBodyInline (getFullName definition) (getItemsType items)
+
+        Dict_ typeName ->
+            renderDictBody (getFullName definition) typeName
+
+        Enum_ _ enum ->
+            renderEnumBody (getFullName definition) enum
+
+        String_ _ ->
+            renderPrimitiveBody "string"
+
+        Int_ _ ->
+            renderPrimitiveBody "int"
+
+        Float_ _ ->
+            renderPrimitiveBody "float"
+
+        Bool_ _ ->
+            renderPrimitiveBody "bool"
+
+        Ref_ ref ->
+            decoderName ref
+
+
 renderPrimitiveBody : String -> String
 renderPrimitiveBody type_ =
     type_
@@ -65,13 +96,19 @@ renderPrimitiveBody type_ =
 renderArrayBody : String -> Type -> String
 renderArrayBody name type_ =
     "list "
-        ++ (renderPropertyDecoder name "Item" type_)
+        ++ renderPropertyDecoder name "Item" type_
         |> flip pipeline [ "map " ++ typeName name ]
+
+
+renderArrayBodyInline : String -> Type -> String
+renderArrayBodyInline name type_ =
+    "list "
+        ++ renderPropertyDecoder name "Item" type_
 
 
 renderDictBody : String -> Type -> String
 renderDictBody name type_ =
-    "dict " ++ (renderPropertyDecoder name "Property" type_)
+    "dict " ++ renderPropertyDecoder name "Property" type_
 
 
 renderObjectBody : String -> Properties -> String
@@ -152,14 +189,13 @@ renderEnumBody parentName enum =
         decoderName_ =
             decoderName parentName
     in
-        (letin
-            [ ( "decodeToType string"
-              , caseof "string"
-                    ((List.map renderEnumEach enum) ++ [ renderEnumFail parentName ])
-              )
-            ]
-            "customDecoder string decodeToType"
-        )
+    letin
+        [ ( "decodeToType string"
+          , caseof "string"
+                (List.map renderEnumEach enum ++ [ renderEnumFail parentName ])
+          )
+        ]
+        "customDecoder string decodeToType"
 
 
 renderEnumEach : String -> ( String, String )

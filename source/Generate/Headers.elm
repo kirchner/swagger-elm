@@ -10,6 +10,7 @@ import Json.Decode.Pipeline exposing (decode, required, optional, hardcoded)
 import Json.Encode
 import Json.Encode.Extra
 import Dict exposing (Dict)
+import Http exposing (Request)
 
 
 maybe : String -> Decoder a -> Decoder (Maybe a -> b) -> Decoder b

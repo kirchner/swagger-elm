@@ -2,7 +2,7 @@ module Generate.Type exposing (..)
 
 import Generate.Utils exposing (typeName, nestedTypeName)
 import Codegen.Utils exposing (sanitize)
-import Codegen.Type exposing (typeAlias, unionType, record, recordField, list, dict, maybe)
+import Codegen.Type exposing (typeAlias, unionType, record, recordField, list, dict, maybe, wrap)
 import Swagger.Definition as Def exposing (Definition, getType, getFullName)
 import Swagger.Type
     exposing
@@ -67,6 +67,53 @@ renderType definition =
 
             Ref_ ref ->
                 typeAliasDecl <| typeName ref
+
+
+renderType_ : Definition -> String
+renderType_ definition =
+    let
+        name =
+            typeName <| getFullName definition
+
+        type_ =
+            getType definition
+
+        unionTypeDecl =
+            unionType name
+
+        objectDecl =
+            name ++ "Record"
+
+        wrap text =
+            "(" ++ text ++ ")"
+    in
+        case type_ of
+            String_ _ ->
+                "String"
+
+            Int_ _ ->
+                "Int"
+
+            Float_ _ ->
+                "Float"
+
+            Bool_ _ ->
+                "Bool"
+
+            Enum_ _ enum ->
+                name
+
+            Object_ props ->
+                objectDecl
+
+            Array_ items ->
+                wrap (list <| renderPropertyType name "Item" <| getItemsType items)
+
+            Dict_ type_ ->
+                dict <| renderPropertyType name "Property" type_
+
+            Ref_ ref ->
+                typeName ref
 
 
 renderEnum : String -> List String -> List String
